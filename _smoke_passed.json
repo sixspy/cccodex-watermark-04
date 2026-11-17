@@ -1,0 +1,12 @@
+{
+  "label": "watermark-04",
+  "port": 7330,
+  "login_url": "http://127.0.0.1:7330/login",
+  "http_status": 200,
+  "checks": [
+    "含登录相关文案",
+    "含密码表单线索"
+  ],
+  "passed": true,
+  "checked_at": "2026-11-18T03:17:55+08:00"
+}
