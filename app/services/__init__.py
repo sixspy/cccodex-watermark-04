@@ -2,6 +2,12 @@ from app.services.templates import list_templates
 from app.services.batches import list_batches, get_batch, stamp_batch
 from app.services.trace import trace_downstream
 from app.services.gaps import list_reports, run_gap_report
+from app.services.vouchers import (
+    list_vouchers,
+    list_conflicts,
+    detect_double_shadow,
+    reconcile_conflict,
+)
 
 __all__ = [
     "list_templates",
@@ -11,4 +17,8 @@ __all__ = [
     "trace_downstream",
     "list_reports",
     "run_gap_report",
+    "list_vouchers",
+    "list_conflicts",
+    "detect_double_shadow",
+    "reconcile_conflict",
 ]

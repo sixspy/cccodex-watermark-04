@@ -8,8 +8,11 @@ from app.config import Config
 def connect(db_path: str | None = None) -> sqlite3.Connection:
     path = db_path or Config.database()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=15)
     conn.row_factory = sqlite3.Row
+    # WAL 让读写不互斥；busy_timeout 让并发盖印在锁上排队而不是立刻报锁错
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -69,6 +72,26 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- 旁路盖印凭证表：每一次盖印（含被挤掉的后手）都留痕，
+-- 运行码同一时刻只许有一枚“保留”凭证，其余落“作废”。
+CREATE TABLE IF NOT EXISTS stamp_vouchers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  voucher_no TEXT NOT NULL UNIQUE,
+  run_code TEXT NOT NULL,
+  watermark_value TEXT NOT NULL,
+  operator TEXT NOT NULL DEFAULT '盖印员',
+  status TEXT NOT NULL CHECK (status IN ('保留','作废')),
+  conflict_group TEXT,
+  retained_voucher_no TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 排他落点：同一运行码至多一枚保留凭证，缺它并发会双写各留一枚
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vouchers_one_retained
+  ON stamp_vouchers(run_code) WHERE status = '保留';
+CREATE INDEX IF NOT EXISTS idx_vouchers_run_code
+  ON stamp_vouchers(run_code);
 """
 
 SEED_TEMPLATES = [
@@ -88,6 +111,11 @@ SEED_EDGES = [
     ("ord-20261114-01", "gmv-20261114-01"),
     ("pay-20261114-01", "gmv-20261114-01"),
     ("ord-20261113-01", "gmv-20261114-01"),
+]
+
+# 历史已盖印批次补一枚保留凭证，保证库存行与凭证表对得齐
+SEED_VOUCHERS = [
+    ("SV-20261113-0001", "ord-20261113-01", "WM-ORD-131", "系统"),
 ]
 
 
@@ -120,5 +148,11 @@ def init_db(db_path: str | None = None) -> None:
             conn.execute(
                 "INSERT INTO lineage_edges(upstream_run_code, downstream_run_code) VALUES (?,?)",
                 (up, down),
+            )
+        for voucher_no, code, wm, operator in SEED_VOUCHERS:
+            conn.execute(
+                "INSERT INTO stamp_vouchers(voucher_no, run_code, watermark_value, operator, status) "
+                "VALUES (?,?,?,?,'保留')",
+                (voucher_no, code, wm, operator),
             )
         conn.execute("INSERT INTO meta(key, value) VALUES ('seeded','1')")

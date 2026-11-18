@@ -91,6 +91,30 @@ th { color: var(--muted); font-weight: 500; }
   background: #e7f5c8;
   font-size: 0.75rem;
 }
+.chip-keep {
+  background: var(--lime);
+  color: var(--lime-ink);
+  font-weight: 700;
+}
+.chip-void {
+  background: #f6dcd8;
+  color: var(--danger);
+  font-weight: 700;
+}
+.void-no {
+  color: var(--danger);
+  text-decoration: line-through;
+  font-weight: 700;
+}
+.conflict-card { border-color: #d8b6b0; }
+.appendix {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  background: #f1f8e2;
+  border: 1px solid #b6d889;
+}
+.appendix p { margin: 0.25rem 0; }
 .muted { color: var(--muted); }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.7rem 0; }
 .cardish {

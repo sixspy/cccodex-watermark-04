@@ -7,10 +7,14 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from app.config import Config
 from app.db import init_db
 from app.services import (
+    detect_double_shadow,
     get_batch,
     list_batches,
+    list_conflicts,
     list_reports,
     list_templates,
+    list_vouchers,
+    reconcile_conflict,
     run_gap_report,
     stamp_batch,
     trace_downstream,
@@ -65,6 +69,13 @@ def html_response(path: Path) -> Response:
         200,
         content=Content(b"text/html; charset=utf-8", path.read_bytes()),
     )
+
+
+def error_response(exc: ServiceError) -> Response:
+    payload: dict = {"ok": False, "error": exc.message}
+    # 冲突收束信息（保留/作废凭证号）一并下发，供前端亮芯片
+    payload.update(exc.extra)
+    return json_response(payload, exc.status_code)
 
 
 @app.router.get("/")
@@ -153,12 +164,12 @@ async def api_batches(request: Request):
 async def api_batch_detail(request: Request):
     try:
         require_user(request)
+        batch_id = int(request.route_values["batch_id"])
+        batch = get_batch(batch_id)
+        if not batch:
+            return json_response({"error": "批次不存在"}, 404)
     except ServiceError as exc:
         return json_response({"error": exc.message}, exc.status_code)
-    batch_id = int(request.route_values["batch_id"])
-    batch = get_batch(batch_id)
-    if not batch:
-        return json_response({"error": "批次不存在"}, 404)
     return json_response({"batch": batch})
 
 
@@ -168,10 +179,59 @@ async def api_stamp(request: Request):
         require_user(request)
         batch_id = int(request.route_values["batch_id"])
         body = await request.json()
-        batch = stamp_batch(batch_id, str(body.get("watermark_value", "")))
+        operator = str(body.get("operator", "") or "").strip() or "盖印员"
+        batch = stamp_batch(
+            batch_id,
+            str(body.get("watermark_value", "")),
+            operator=operator,
+        )
     except ServiceError as exc:
-        return json_response({"ok": False, "error": exc.message}, exc.status_code)
+        return error_response(exc)
     return json_response({"ok": True, "batch": batch})
+
+
+@app.router.get("/api/vouchers")
+async def api_vouchers(request: Request):
+    """去重台：全量盖印凭证，可按保留/作废过滤。"""
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_response({"error": exc.message}, exc.status_code)
+    status = request.query.get("status")
+    status_val = status[0] if status else None
+    return json_response({"items": list_vouchers(status=status_val)})
+
+
+@app.router.get("/api/conflicts")
+async def api_conflicts(request: Request):
+    """冲突列表：同一运行码挂多枚凭证的组，带保留/作废芯片数据。"""
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_response({"error": exc.message}, exc.status_code)
+    return json_response({"items": list_conflicts()})
+
+
+@app.router.post("/api/conflicts/reconcile")
+async def api_reconcile(request: Request):
+    """去重台收束：保留先手凭证，后手凭证判废，库存行对齐保留水印。"""
+    try:
+        require_user(request)
+        body = await request.json()
+        result = reconcile_conflict(str(body.get("run_code", "")))
+    except ServiceError as exc:
+        return error_response(exc)
+    return json_response(result)
+
+
+@app.router.get("/api/double-shadow")
+async def api_double_shadow(request: Request):
+    """双影巡检：库存行与保留凭证对不齐即列问题，空列表即干净。"""
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_response({"error": exc.message}, exc.status_code)
+    return json_response({"items": detect_double_shadow()})
 
 
 @app.router.post("/api/trace")
@@ -181,7 +241,7 @@ async def api_trace(request: Request):
         body = await request.json()
         result = trace_downstream(str(body.get("watermark_value", "")))
     except ServiceError as exc:
-        return json_response({"ok": False, "error": exc.message}, exc.status_code)
+        return error_response(exc)
     return json_response({"ok": True, **result})
 
 
